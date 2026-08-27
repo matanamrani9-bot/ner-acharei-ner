@@ -1,0 +1,68 @@
+name: פוסט יומי
+
+# רץ כל יום ב-05:00 UTC (08:00 שעון ישראל).
+# מרנדר את הפוסט שהגיע זמנו, דוחף אותו לריפו, ואז מפרסם לאינסטגרם.
+# הדחיפה חייבת לקרות לפני הפרסום, כי מטא מושכת את התמונה מכתובת ציבורית.
+on:
+  schedule:
+    - cron: "0 5 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "הרצה יבשה — מרנדר ומדפיס, בלי לפרסם"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: daily
+  cancel-in-progress: false
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: התקנת Pillow
+        run: pip install --quiet "pillow>=10"
+
+      - name: רינדור התמונות
+        run: python bot.py render
+
+      - name: דחיפת התמונות לריפו
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            git config user.name  "ner-bot"
+            git config user.email "actions@github.com"
+            git add -A
+            git commit -m "רינדור פוסט"
+            git push
+            sleep 10
+          else
+            echo "אין מה לרנדר היום."
+          fi
+
+      - name: פרסום לאינסטגרם
+        env:
+          IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+          IG_USER_ID: ${{ secrets.IG_USER_ID }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: python bot.py publish
+
+      - name: עדכון הסטטוס בתור
+        if: always()
+        run: |
+          if [ -n "$(git status --porcelain queue.json)" ]; then
+            git config user.name  "ner-bot"
+            git config user.email "actions@github.com"
+            git add queue.json
+            git commit -m "סימון כפורסם"
+            git push
+          fi
